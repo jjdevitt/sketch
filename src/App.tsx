@@ -1,3 +1,4 @@
+import { Share2, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ToolDock } from './components/ToolDock'
 import { TopBar } from './components/TopBar'
@@ -11,8 +12,12 @@ import type {
   WhiteboardElement,
 } from './types/whiteboard'
 import {
-  copyCurrentScreenImageToClipboard,
+  canShareImageFiles,
   downloadCurrentScreenImage,
+  renderScreenToPngSync,
+  shareSnapshotImage,
+  writeSnapshotToClipboard,
+  type RenderedPngSnapshot,
 } from './utils/renderer'
 
 interface HistoryState {
@@ -23,6 +28,7 @@ interface HistoryState {
 
 type ToastState =
   | { kind: 'cleared' }
+  | { kind: 'copied'; snapshot: RenderedPngSnapshot }
   | { kind: 'message'; text: string }
   | null
 
@@ -47,6 +53,9 @@ export function App() {
   const [justCopied, setJustCopied] = useState(false)
   const [justSaved, setJustSaved] = useState(false)
   const [toast, setToast] = useState<ToastState>(null)
+  const [fallbackSnapshot, setFallbackSnapshot] = useState<RenderedPngSnapshot | null>(
+    null,
+  )
 
   const viewportSizeRef = useRef({
     width: typeof window !== 'undefined' ? window.innerWidth : 1024,
@@ -57,6 +66,7 @@ export function App() {
   const toastTimerRef = useRef<number | null>(null)
 
   const activeColor = activeTool === 'highlighter' ? highlighterColor : inkColor
+  const supportsFileShare = canShareImageFiles()
 
   const showToast = useCallback((nextToast: ToastState, durationMs: number) => {
     setToast(nextToast)
@@ -125,8 +135,17 @@ export function App() {
   const handleCopy = useCallback(async () => {
     setIsStyleOpen(false)
     const { width, height } = viewportSizeRef.current
+
+    let snapshot: RenderedPngSnapshot
     try {
-      await copyCurrentScreenImageToClipboard(width, height, camera, history.present)
+      snapshot = renderScreenToPngSync(width, height, camera, history.present)
+    } catch {
+      showToast({ kind: 'message', text: 'Could not capture sketch' }, 2400)
+      return
+    }
+
+    try {
+      await writeSnapshotToClipboard(snapshot)
       setJustCopied(true)
       if (copyTimerRef.current) {
         window.clearTimeout(copyTimerRef.current)
@@ -134,11 +153,31 @@ export function App() {
       copyTimerRef.current = window.setTimeout(() => {
         setJustCopied(false)
       }, 2000)
-      showToast({ kind: 'message', text: 'Copied sketch to clipboard' }, 2200)
+      showToast({ kind: 'copied', snapshot }, 3400)
     } catch {
-      showToast({ kind: 'message', text: 'Clipboard access unavailable' }, 2600)
+      // On Android browsers/WebViews that restrict programmatic image clipboard writes,
+      // open the interactive Copy / Share preview sheet so the user can either long-press
+      // to "Copy image" natively or open the Android system Share/Copy sheet.
+      setFallbackSnapshot(snapshot)
     }
   }, [camera, history.present, showToast])
+
+  const handleShareSnapshot = useCallback(
+    async (snapshot: RenderedPngSnapshot) => {
+      setToast(null)
+      try {
+        const shared = await shareSnapshotImage(snapshot)
+        if (shared) {
+          setFallbackSnapshot(null)
+        } else {
+          setFallbackSnapshot(snapshot)
+        }
+      } catch {
+        setFallbackSnapshot(snapshot)
+      }
+    },
+    [],
+  )
 
   const handleSave = useCallback(async () => {
     setIsStyleOpen(false)
@@ -236,6 +275,7 @@ export function App() {
 
       if (e.key === 'Escape') {
         setIsStyleOpen(false)
+        setFallbackSnapshot(null)
         return
       }
 
@@ -323,7 +363,13 @@ export function App() {
 
       {toast && (
         <div className="toast-banner" role="status" aria-live="polite">
-          <span>{toast.kind === 'cleared' ? 'Canvas cleared' : toast.text}</span>
+          <span>
+            {toast.kind === 'cleared'
+              ? 'Canvas cleared'
+              : toast.kind === 'copied'
+                ? 'Copied sketch to clipboard'
+                : toast.text}
+          </span>
           {toast.kind === 'cleared' && (
             <button
               id="btn-toast-undo"
@@ -334,6 +380,73 @@ export function App() {
               Undo
             </button>
           )}
+          {toast.kind === 'copied' && supportsFileShare && (
+            <button
+              id="btn-toast-share"
+              type="button"
+              className="toast-action-btn"
+              onClick={() => void handleShareSnapshot(toast.snapshot)}
+            >
+              Share
+            </button>
+          )}
+        </div>
+      )}
+
+      {fallbackSnapshot && (
+        <div
+          className="snapshot-modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="snapshot-modal-title"
+          onClick={() => setFallbackSnapshot(null)}
+        >
+          <div
+            className="snapshot-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="snapshot-modal-header">
+              <h2 id="snapshot-modal-title" className="snapshot-modal-title">
+                Copy or Share Sketch
+              </h2>
+              <button
+                id="btn-close-snapshot-modal"
+                type="button"
+                className="icon-btn"
+                onClick={() => setFallbackSnapshot(null)}
+                aria-label="Close preview"
+              >
+                <X size={18} strokeWidth={2.1} />
+              </button>
+            </div>
+
+            <p className="snapshot-modal-hint">
+              Touch and hold the image below to choose <strong>Copy image</strong>, or use
+              your device share menu.
+            </p>
+
+            <div className="snapshot-preview-frame">
+              <img
+                src={fallbackSnapshot.dataUrl}
+                alt="Sketch preview"
+                className="snapshot-preview-img"
+              />
+            </div>
+
+            {supportsFileShare && (
+              <div className="snapshot-modal-actions">
+                <button
+                  id="btn-share-snapshot"
+                  type="button"
+                  className="snapshot-primary-btn"
+                  onClick={() => void handleShareSnapshot(fallbackSnapshot)}
+                >
+                  <Share2 size={16} strokeWidth={2.1} />
+                  <span>Share / Copy Image</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

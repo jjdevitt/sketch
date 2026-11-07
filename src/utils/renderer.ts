@@ -252,24 +252,55 @@ export function renderScene({
   ctx.restore()
 }
 
+function dataUrlToBlobSync(dataUrl: string): Blob {
+  const commaIdx = dataUrl.indexOf(',')
+  const base64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl
+  const binary = atob(base64)
+  const len = binary.length
+  const bytes = new Uint8Array(len)
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return new Blob([bytes], { type: 'image/png' })
+}
+
+export interface RenderedPngSnapshot {
+  blob: Blob
+  dataUrl: string
+  filename: string
+}
+
+function buildSnapshotFilename(): string {
+  const now = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+  return `sketch-${stamp}.png`
+}
+
 /**
- * Renders the current screen view at high resolution onto an offscreen canvas
- * and resolves to a PNG Blob.
+ * Synchronously renders the current screen view to both a PNG Blob and Data URL.
+ * Keeping this 100% synchronous ensures transient user activation (`navigator.userActivation`)
+ * is never lost before calling `navigator.clipboard.write` or `navigator.share` on mobile devices,
+ * and caps the longest pixel edge so Android system clipboard buffers never overflow.
  */
-export function renderScreenToBlob(
+export function renderScreenToPngSync(
   width: number,
   height: number,
   camera: Camera,
   elements: WhiteboardElement[],
-): Promise<Blob> {
-  const exportDpr = Math.max(window.devicePixelRatio || 1, 2)
+  maxLongestEdge = 1600,
+): RenderedPngSnapshot {
+  const rawDpr = Math.min(Math.max(window.devicePixelRatio || 1, 1.5), 2)
+  const longestCssEdge = Math.max(width, height, 1)
+  const exportDpr = Math.min(rawDpr, maxLongestEdge / longestCssEdge)
+
   const offscreen = document.createElement('canvas')
-  offscreen.width = Math.round(width * exportDpr)
-  offscreen.height = Math.round(height * exportDpr)
+  offscreen.width = Math.max(1, Math.round(width * exportDpr))
+  offscreen.height = Math.max(1, Math.round(height * exportDpr))
 
   const ctx = offscreen.getContext('2d')
   if (!ctx) {
-    return Promise.reject(new Error('Could not initialize 2D canvas context'))
+    throw new Error('Could not initialize 2D canvas context')
   }
 
   renderScene({
@@ -282,47 +313,116 @@ export function renderScreenToBlob(
     draftElement: null,
   })
 
-  return new Promise<Blob>((resolve, reject) => {
-    offscreen.toBlob((blob) => {
-      if (blob) {
-        resolve(blob)
-      } else {
-        reject(new Error('Failed to encode canvas image as PNG'))
-      }
-    }, 'image/png')
-  })
+  const dataUrl = offscreen.toDataURL('image/png')
+  const blob = dataUrlToBlobSync(dataUrl)
+  return {
+    blob,
+    dataUrl,
+    filename: buildSnapshotFilename(),
+  }
+}
+
+export function canShareImageFiles(): boolean {
+  if (
+    typeof navigator === 'undefined' ||
+    typeof navigator.share !== 'function' ||
+    typeof navigator.canShare !== 'function' ||
+    typeof File === 'undefined'
+  ) {
+    return false
+  }
+  try {
+    const probe = new File([new Uint8Array(1)], 'sketch.png', { type: 'image/png' })
+    return navigator.canShare({ files: [probe] })
+  } catch {
+    return false
+  }
+}
+
+export async function shareSnapshotImage(snapshot: RenderedPngSnapshot): Promise<boolean> {
+  if (!canShareImageFiles()) return false
+  const file = new File([snapshot.blob], snapshot.filename, { type: 'image/png' })
+  try {
+    await navigator.share({
+      files: [file],
+      title: 'Sketch',
+    })
+    return true
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      // User dismissed the native share sheet after opening it
+      return true
+    }
+    throw err
+  }
+}
+
+function copyImageViaDomSelection(dataUrl: string): boolean {
+  if (typeof document === 'undefined') return false
+  const container = document.createElement('div')
+  container.contentEditable = 'true'
+  container.style.position = 'fixed'
+  container.style.left = '-9999px'
+  container.style.top = '0'
+  container.style.opacity = '0'
+  container.style.userSelect = 'auto'
+  container.style.webkitUserSelect = 'auto'
+
+  const img = document.createElement('img')
+  img.src = dataUrl
+  container.appendChild(img)
+  document.body.appendChild(container)
+
+  let copied = false
+  try {
+    const range = document.createRange()
+    range.selectNode(img)
+    const selection = window.getSelection()
+    if (selection) {
+      selection.removeAllRanges()
+      selection.addRange(range)
+      copied = document.execCommand('copy')
+      selection.removeAllRanges()
+    }
+  } catch {
+    copied = false
+  } finally {
+    document.body.removeChild(container)
+  }
+  return copied
 }
 
 /**
- * Copies the current screen image at high resolution on a crisp white background
- * directly to the system clipboard as a PNG image.
+ * Copies a pre-rendered PNG snapshot directly to the system clipboard.
+ * Uses a synchronously-created concrete Blob so both Android Chromium and iOS WebKit
+ * execute `navigator.clipboard.write` within the active user gesture, with a DOM
+ * selection fallback for Android WebViews.
  */
-export async function copyCurrentScreenImageToClipboard(
-  width: number,
-  height: number,
-  camera: Camera,
-  elements: WhiteboardElement[],
+export async function writeSnapshotToClipboard(
+  snapshot: RenderedPngSnapshot,
 ): Promise<void> {
   if (
-    typeof navigator === 'undefined' ||
-    !navigator.clipboard?.write ||
-    typeof ClipboardItem === 'undefined'
+    typeof navigator !== 'undefined' &&
+    navigator.clipboard?.write &&
+    typeof ClipboardItem !== 'undefined'
   ) {
-    throw new Error('Image clipboard is not supported in this browser')
+    try {
+      const item = new ClipboardItem({ 'image/png': snapshot.blob })
+      await navigator.clipboard.write([item])
+      return
+    } catch (err) {
+      if (copyImageViaDomSelection(snapshot.dataUrl)) {
+        return
+      }
+      throw err
+    }
   }
 
-  const blobPromise = renderScreenToBlob(width, height, camera, elements)
-
-  try {
-    // Passing Promise<Blob> directly to ClipboardItem preserves the transient user gesture on iOS Safari / WebKit
-    const item = new ClipboardItem({ 'image/png': blobPromise })
-    await navigator.clipboard.write([item])
-  } catch {
-    // Fallback for browsers that require a resolved Blob instance in ClipboardItem
-    const blob = await blobPromise
-    const item = new ClipboardItem({ 'image/png': blob })
-    await navigator.clipboard.write([item])
+  if (copyImageViaDomSelection(snapshot.dataUrl)) {
+    return
   }
+
+  throw new Error('Image clipboard is not supported in this browser')
 }
 
 /**
@@ -335,19 +435,13 @@ export async function downloadCurrentScreenImage(
   camera: Camera,
   elements: WhiteboardElement[],
 ): Promise<void> {
-  const now = new Date()
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
-  const filename = `sketch-${stamp}.png`
-
-  const blob = await renderScreenToBlob(width, height, camera, elements)
-  const url = URL.createObjectURL(blob)
+  const snapshot = renderScreenToPngSync(width, height, camera, elements, 2560)
+  const url = URL.createObjectURL(snapshot.blob)
   const link = document.createElement('a')
-  link.download = filename
+  link.download = snapshot.filename
   link.href = url
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
   setTimeout(() => URL.revokeObjectURL(url), 5000)
 }
-
