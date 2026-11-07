@@ -5,6 +5,8 @@
   --surface-solid: hsl(0, 0%, 100%);
   --surface-hover: hsl(240, 5%, 96%);
   --surface-active: hsl(240, 6%, 93%);
+  --success-bg: hsl(142, 60%, 92%);
+  --success-fg: hsl(142, 64%, 24%);
   --surface-selected: hsl(240, 10%, 11%);
   --surface-selected-fg: hsl(0, 0%, 100%);
 
@@ -641,6 +643,13 @@ body,
   gap: 8px;
 }
 
+.snapshot-modal-title-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 .snapshot-modal-title {
   margin: 0;
   font-size: 0.9375rem;
@@ -648,10 +657,22 @@ body,
   color: var(--ink-primary);
 }
 
+.snapshot-copied-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--success-bg);
+  color: var(--success-fg);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
 .snapshot-modal-hint {
   margin: 0;
   font-size: 0.8125rem;
-  line-height: 1.4;
+  line-height: 1.45;
   color: var(--ink-secondary);
 }
 
@@ -705,6 +726,34 @@ body,
 }
 
 .snapshot-primary-btn:active {
+  transform: scale(0.96);
+}
+
+.snapshot-secondary-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-btn);
+  background: var(--surface-hover);
+  color: var(--ink-primary);
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    transform 110ms ease;
+}
+
+.snapshot-secondary-btn:hover {
+  background: var(--surface-active);
+}
+
+.snapshot-secondary-btn:active {
   transform: scale(0.96);
 }
 

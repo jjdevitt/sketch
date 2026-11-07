@@ -322,6 +322,11 @@ export function renderScreenToPngSync(
   }
 }
 
+export function isAndroidDevice(): boolean {
+  if (typeof navigator === 'undefined') return false
+  return /Android/i.test(navigator.userAgent)
+}
+
 export function canShareImageFiles(): boolean {
   if (
     typeof navigator === 'undefined' ||
@@ -357,46 +362,12 @@ export async function shareSnapshotImage(snapshot: RenderedPngSnapshot): Promise
   }
 }
 
-function copyImageViaDomSelection(dataUrl: string): boolean {
-  if (typeof document === 'undefined') return false
-  const container = document.createElement('div')
-  container.contentEditable = 'true'
-  container.style.position = 'fixed'
-  container.style.left = '-9999px'
-  container.style.top = '0'
-  container.style.opacity = '0'
-  container.style.userSelect = 'auto'
-  container.style.webkitUserSelect = 'auto'
-
-  const img = document.createElement('img')
-  img.src = dataUrl
-  container.appendChild(img)
-  document.body.appendChild(container)
-
-  let copied = false
-  try {
-    const range = document.createRange()
-    range.selectNode(img)
-    const selection = window.getSelection()
-    if (selection) {
-      selection.removeAllRanges()
-      selection.addRange(range)
-      copied = document.execCommand('copy')
-      selection.removeAllRanges()
-    }
-  } catch {
-    copied = false
-  } finally {
-    document.body.removeChild(container)
-  }
-  return copied
-}
-
 /**
  * Copies a pre-rendered PNG snapshot directly to the system clipboard.
  * Uses a synchronously-created concrete Blob so both Android Chromium and iOS WebKit
- * execute `navigator.clipboard.write` within the active user gesture, with a DOM
- * selection fallback for Android WebViews.
+ * execute `navigator.clipboard.write` within the active user gesture.
+ * Never falls back to `document.execCommand('copy')` on a DOM `<img>`, because on
+ * Android that writes empty `text/plain` (`""`) to the clipboard instead of image data.
  */
 export async function writeSnapshotToClipboard(
   snapshot: RenderedPngSnapshot,
@@ -406,23 +377,23 @@ export async function writeSnapshotToClipboard(
     navigator.clipboard?.write &&
     typeof ClipboardItem !== 'undefined'
   ) {
-    try {
-      const item = new ClipboardItem({ 'image/png': snapshot.blob })
-      await navigator.clipboard.write([item])
-      return
-    } catch (err) {
-      if (copyImageViaDomSelection(snapshot.dataUrl)) {
-        return
-      }
-      throw err
-    }
-  }
-
-  if (copyImageViaDomSelection(snapshot.dataUrl)) {
+    const item = new ClipboardItem({ 'image/png': snapshot.blob })
+    await navigator.clipboard.write([item])
     return
   }
 
   throw new Error('Image clipboard is not supported in this browser')
+}
+
+export function downloadSnapshotImage(snapshot: RenderedPngSnapshot): void {
+  const url = URL.createObjectURL(snapshot.blob)
+  const link = document.createElement('a')
+  link.download = snapshot.filename
+  link.href = url
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  setTimeout(() => URL.revokeObjectURL(url), 5000)
 }
 
 /**
@@ -436,12 +407,5 @@ export async function downloadCurrentScreenImage(
   elements: WhiteboardElement[],
 ): Promise<void> {
   const snapshot = renderScreenToPngSync(width, height, camera, elements, 2560)
-  const url = URL.createObjectURL(snapshot.blob)
-  const link = document.createElement('a')
-  link.download = snapshot.filename
-  link.href = url
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-  setTimeout(() => URL.revokeObjectURL(url), 5000)
+  downloadSnapshotImage(snapshot)
 }

@@ -1,4 +1,4 @@
-import { Share2, X } from 'lucide-react'
+import { Check, Download, Share2, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ToolDock } from './components/ToolDock'
 import { TopBar } from './components/TopBar'
@@ -14,6 +14,8 @@ import type {
 import {
   canShareImageFiles,
   downloadCurrentScreenImage,
+  downloadSnapshotImage,
+  isAndroidDevice,
   renderScreenToPngSync,
   shareSnapshotImage,
   writeSnapshotToClipboard,
@@ -31,6 +33,11 @@ type ToastState =
   | { kind: 'copied'; snapshot: RenderedPngSnapshot }
   | { kind: 'message'; text: string }
   | null
+
+interface SnapshotModalState {
+  snapshot: RenderedPngSnapshot
+  copiedToClipboard: boolean
+}
 
 const MAX_HISTORY = 100
 
@@ -53,7 +60,7 @@ export function App() {
   const [justCopied, setJustCopied] = useState(false)
   const [justSaved, setJustSaved] = useState(false)
   const [toast, setToast] = useState<ToastState>(null)
-  const [fallbackSnapshot, setFallbackSnapshot] = useState<RenderedPngSnapshot | null>(
+  const [fallbackSnapshot, setFallbackSnapshot] = useState<SnapshotModalState | null>(
     null,
   )
 
@@ -153,12 +160,19 @@ export function App() {
       copyTimerRef.current = window.setTimeout(() => {
         setJustCopied(false)
       }, 2000)
-      showToast({ kind: 'copied', snapshot }, 3400)
+
+      if (isAndroidDevice()) {
+        // On Android, Chrome's Clipboard API writes a private FileProvider URI that only
+        // keyboard clipboard strips (Gboard / Samsung Keyboard) can commit—most apps'
+        // floating text "Paste" popup (`android.R.id.paste`) ignores non-text URIs.
+        // Open the Copy / Share sheet so the user has 1-tap access to Android's native
+        // Share sheet, long-press "Copy image", and clear keyboard paste instructions.
+        setFallbackSnapshot({ snapshot, copiedToClipboard: true })
+      } else {
+        showToast({ kind: 'copied', snapshot }, 3400)
+      }
     } catch {
-      // On Android browsers/WebViews that restrict programmatic image clipboard writes,
-      // open the interactive Copy / Share preview sheet so the user can either long-press
-      // to "Copy image" natively or open the Android system Share/Copy sheet.
-      setFallbackSnapshot(snapshot)
+      setFallbackSnapshot({ snapshot, copiedToClipboard: false })
     }
   }, [camera, history.present, showToast])
 
@@ -170,10 +184,16 @@ export function App() {
         if (shared) {
           setFallbackSnapshot(null)
         } else {
-          setFallbackSnapshot(snapshot)
+          setFallbackSnapshot((prev) => ({
+            snapshot,
+            copiedToClipboard: prev?.copiedToClipboard ?? false,
+          }))
         }
       } catch {
-        setFallbackSnapshot(snapshot)
+        setFallbackSnapshot((prev) => ({
+          snapshot,
+          copiedToClipboard: prev?.copiedToClipboard ?? false,
+        }))
       }
     },
     [],
@@ -406,9 +426,17 @@ export function App() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="snapshot-modal-header">
-              <h2 id="snapshot-modal-title" className="snapshot-modal-title">
-                Copy or Share Sketch
-              </h2>
+              <div className="snapshot-modal-title-group">
+                <h2 id="snapshot-modal-title" className="snapshot-modal-title">
+                  Copy or Share Sketch
+                </h2>
+                {fallbackSnapshot.copiedToClipboard && (
+                  <span className="snapshot-copied-badge">
+                    <Check size={12} strokeWidth={2.5} />
+                    <span>In keyboard clipboard</span>
+                  </span>
+                )}
+              </div>
               <button
                 id="btn-close-snapshot-modal"
                 type="button"
@@ -420,32 +448,55 @@ export function App() {
               </button>
             </div>
 
-            <p className="snapshot-modal-hint">
-              Touch and hold the image below to choose <strong>Copy image</strong>, or use
-              your device share menu.
-            </p>
+            {fallbackSnapshot.copiedToClipboard ? (
+              <p className="snapshot-modal-hint">
+                <strong>Android tip:</strong> Pop-up <em>&ldquo;Paste&rdquo;</em> menus only
+                paste text in most apps. To insert this image, tap the{' '}
+                <strong>image thumbnail in your keyboard&apos;s top bar</strong> (Gboard), or
+                tap <strong>Share to App</strong> below.
+              </p>
+            ) : (
+              <p className="snapshot-modal-hint">
+                Touch and hold the image below to choose <strong>Copy image</strong>, or tap{' '}
+                <strong>Share to App</strong> below.
+              </p>
+            )}
 
             <div className="snapshot-preview-frame">
               <img
-                src={fallbackSnapshot.dataUrl}
+                src={fallbackSnapshot.snapshot.dataUrl}
                 alt="Sketch preview"
                 className="snapshot-preview-img"
               />
             </div>
 
-            {supportsFileShare && (
-              <div className="snapshot-modal-actions">
+            <div className="snapshot-modal-actions">
+              {supportsFileShare && (
                 <button
                   id="btn-share-snapshot"
                   type="button"
                   className="snapshot-primary-btn"
-                  onClick={() => void handleShareSnapshot(fallbackSnapshot)}
+                  onClick={() => void handleShareSnapshot(fallbackSnapshot.snapshot)}
                 >
                   <Share2 size={16} strokeWidth={2.1} />
-                  <span>Share / Copy Image</span>
+                  <span>Share to App / System Copy</span>
                 </button>
-              </div>
-            )}
+              )}
+              <button
+                id="btn-download-snapshot"
+                type="button"
+                className={
+                  supportsFileShare ? 'snapshot-secondary-btn' : 'snapshot-primary-btn'
+                }
+                onClick={() => {
+                  downloadSnapshotImage(fallbackSnapshot.snapshot)
+                  setFallbackSnapshot(null)
+                }}
+              >
+                <Download size={16} strokeWidth={2.1} />
+                <span>{supportsFileShare ? 'Save' : 'Save PNG'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
