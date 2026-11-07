@@ -246,11 +246,11 @@ body,
   cursor: default;
 }
 
-.icon-btn.btn-save {
-  padding: 0 12px;
+.icon-btn.btn-action {
+  padding: 0 11px;
 }
 
-.icon-btn.btn-save.is-saved {
+.icon-btn.btn-action.is-confirmed {
   color: var(--accent-success);
   background-color: hsla(158, 64%, 38%, 0.09);
 }
@@ -598,7 +598,7 @@ body,
 }
 
 /* Responsive refinements for compact phones & wider laptops */
-@media (max-width: 400px) {
+@media (max-width: 480px) {
   .tool-dock {
     gap: 2px;
     padding: 4px;
@@ -610,11 +610,11 @@ body,
     height: 40px;
   }
 
-  .save-label {
+  .action-label {
     display: none;
   }
 
-  .icon-btn.btn-save {
+  .icon-btn.btn-action {
     padding: 0 9px;
   }
 }

@@ -1,15 +1,17 @@
-import { Check, Download, Redo2, Trash2, Undo2 } from 'lucide-react'
+import { Check, Copy, Download, Redo2, Trash2, Undo2 } from 'lucide-react'
 import type { Camera } from '../types/whiteboard'
 
 interface TopBarProps {
   canUndo: boolean
   canRedo: boolean
   isEmpty: boolean
+  justCopied: boolean
   justSaved: boolean
   camera: Camera
   onUndo: () => void
   onRedo: () => void
   onClear: () => void
+  onCopy: () => void
   onSave: () => void
   onResetView: () => void
 }
@@ -18,11 +20,13 @@ export function TopBar({
   canUndo,
   canRedo,
   isEmpty,
+  justCopied,
   justSaved,
   camera,
   onUndo,
   onRedo,
   onClear,
+  onCopy,
   onSave,
   onResetView,
 }: TopBarProps) {
@@ -91,9 +95,25 @@ export function TopBar({
           <div className="pill-divider" aria-hidden="true" />
 
           <button
+            id="btn-copy-image"
+            type="button"
+            className={`icon-btn btn-action ${justCopied ? 'is-confirmed' : ''}`}
+            onClick={onCopy}
+            aria-label="Copy current sketch image to clipboard"
+            title="Copy current screen to clipboard (Ctrl+C)"
+          >
+            {justCopied ? (
+              <Check size={17} strokeWidth={2.4} />
+            ) : (
+              <Copy size={17} strokeWidth={2.1} />
+            )}
+            <span className="action-label">{justCopied ? 'Copied' : 'Copy'}</span>
+          </button>
+
+          <button
             id="btn-save-image"
             type="button"
-            className={`icon-btn btn-save ${justSaved ? 'is-saved' : ''}`}
+            className={`icon-btn btn-action ${justSaved ? 'is-confirmed' : ''}`}
             onClick={onSave}
             aria-label="Save current screen image"
             title="Download current screen as PNG (Ctrl+S)"
@@ -103,7 +123,7 @@ export function TopBar({
             ) : (
               <Download size={17} strokeWidth={2.1} />
             )}
-            <span className="save-label">{justSaved ? 'Saved' : 'Save'}</span>
+            <span className="action-label">{justSaved ? 'Saved' : 'Save'}</span>
           </button>
         </div>
       </div>

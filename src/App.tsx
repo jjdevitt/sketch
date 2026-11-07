@@ -10,13 +10,21 @@ import type {
   ToolType,
   WhiteboardElement,
 } from './types/whiteboard'
-import { downloadCurrentScreenImage } from './utils/renderer'
+import {
+  copyCurrentScreenImageToClipboard,
+  downloadCurrentScreenImage,
+} from './utils/renderer'
 
 interface HistoryState {
   past: WhiteboardElement[][]
   present: WhiteboardElement[]
   future: WhiteboardElement[][]
 }
+
+type ToastState =
+  | { kind: 'cleared' }
+  | { kind: 'message'; text: string }
+  | null
 
 const MAX_HISTORY = 100
 
@@ -36,24 +44,38 @@ export function App() {
   const [strokeSize, setStrokeSize] = useState<StrokeSizeKey>('medium')
   const [isStyleOpen, setIsStyleOpen] = useState(false)
   const [isSpacePressed, setIsSpacePressed] = useState(false)
+  const [justCopied, setJustCopied] = useState(false)
   const [justSaved, setJustSaved] = useState(false)
-  const [showClearedToast, setShowClearedToast] = useState(false)
+  const [toast, setToast] = useState<ToastState>(null)
 
   const viewportSizeRef = useRef({
     width: typeof window !== 'undefined' ? window.innerWidth : 1024,
     height: typeof window !== 'undefined' ? window.innerHeight : 768,
   })
+  const copyTimerRef = useRef<number | null>(null)
   const saveTimerRef = useRef<number | null>(null)
-  const clearToastTimerRef = useRef<number | null>(null)
+  const toastTimerRef = useRef<number | null>(null)
 
   const activeColor = activeTool === 'highlighter' ? highlighterColor : inkColor
+
+  const showToast = useCallback((nextToast: ToastState, durationMs: number) => {
+    setToast(nextToast)
+    if (toastTimerRef.current) {
+      window.clearTimeout(toastTimerRef.current)
+    }
+    if (nextToast) {
+      toastTimerRef.current = window.setTimeout(() => {
+        setToast(null)
+      }, durationMs)
+    }
+  }, [])
 
   const handleViewportResize = useCallback((size: { width: number; height: number }) => {
     viewportSizeRef.current = size
   }, [])
 
   const commitElements = useCallback((nextElements: WhiteboardElement[]) => {
-    setShowClearedToast(false)
+    setToast((prev) => (prev?.kind === 'cleared' ? null : prev))
     setHistory((prev) => ({
       past: [...prev.past.slice(-(MAX_HISTORY - 1)), prev.present],
       present: nextElements,
@@ -62,7 +84,7 @@ export function App() {
   }, [])
 
   const handleUndo = useCallback(() => {
-    setShowClearedToast(false)
+    setToast((prev) => (prev?.kind === 'cleared' ? null : prev))
     setHistory((prev) => {
       if (prev.past.length === 0) return prev
       const previous = prev.past[prev.past.length - 1]
@@ -75,7 +97,7 @@ export function App() {
   }, [])
 
   const handleRedo = useCallback(() => {
-    setShowClearedToast(false)
+    setToast((prev) => (prev?.kind === 'cleared' ? null : prev))
     setHistory((prev) => {
       if (prev.future.length === 0) return prev
       const [next, ...remainingFuture] = prev.future
@@ -97,14 +119,26 @@ export function App() {
         future: [],
       }
     })
-    setShowClearedToast(true)
-    if (clearToastTimerRef.current) {
-      window.clearTimeout(clearToastTimerRef.current)
+    showToast({ kind: 'cleared' }, 3400)
+  }, [showToast])
+
+  const handleCopy = useCallback(async () => {
+    setIsStyleOpen(false)
+    const { width, height } = viewportSizeRef.current
+    try {
+      await copyCurrentScreenImageToClipboard(width, height, camera, history.present)
+      setJustCopied(true)
+      if (copyTimerRef.current) {
+        window.clearTimeout(copyTimerRef.current)
+      }
+      copyTimerRef.current = window.setTimeout(() => {
+        setJustCopied(false)
+      }, 2000)
+      showToast({ kind: 'message', text: 'Copied sketch to clipboard' }, 2200)
+    } catch {
+      showToast({ kind: 'message', text: 'Clipboard access unavailable' }, 2600)
     }
-    clearToastTimerRef.current = window.setTimeout(() => {
-      setShowClearedToast(false)
-    }, 3400)
-  }, [])
+  }, [camera, history.present, showToast])
 
   const handleSave = useCallback(async () => {
     setIsStyleOpen(false)
@@ -171,6 +205,12 @@ export function App() {
       }
 
       if (isTypingTarget(e.target)) return
+
+      if (mod && e.key.toLowerCase() === 'c') {
+        e.preventDefault()
+        void handleCopy()
+        return
+      }
 
       if (mod && e.key.toLowerCase() === 'z') {
         e.preventDefault()
@@ -254,12 +294,13 @@ export function App() {
       window.removeEventListener('keyup', handleKeyUp)
       window.removeEventListener('blur', handleWindowBlur)
     }
-  }, [handleRedo, handleSave, handleUndo])
+  }, [handleCopy, handleRedo, handleSave, handleUndo])
 
   useEffect(() => {
     return () => {
+      if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current)
       if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)
-      if (clearToastTimerRef.current) window.clearTimeout(clearToastTimerRef.current)
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current)
     }
   }, [])
 
@@ -269,26 +310,30 @@ export function App() {
         canUndo={history.past.length > 0}
         canRedo={history.future.length > 0}
         isEmpty={history.present.length === 0}
+        justCopied={justCopied}
         justSaved={justSaved}
         camera={camera}
         onUndo={handleUndo}
         onRedo={handleRedo}
         onClear={handleClear}
+        onCopy={() => void handleCopy()}
         onSave={() => void handleSave()}
         onResetView={handleResetView}
       />
 
-      {showClearedToast && (
+      {toast && (
         <div className="toast-banner" role="status" aria-live="polite">
-          <span>Canvas cleared</span>
-          <button
-            id="btn-toast-undo"
-            type="button"
-            className="toast-action-btn"
-            onClick={handleUndo}
-          >
-            Undo
-          </button>
+          <span>{toast.kind === 'cleared' ? 'Canvas cleared' : toast.text}</span>
+          {toast.kind === 'cleared' && (
+            <button
+              id="btn-toast-undo"
+              type="button"
+              className="toast-action-btn"
+              onClick={handleUndo}
+            >
+              Undo
+            </button>
+          )}
         </div>
       )}
 

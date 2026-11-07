@@ -253,22 +253,24 @@ export function renderScene({
 }
 
 /**
- * Exports the current screen image at high resolution on a crisp white background
- * and triggers an immediate file download.
+ * Renders the current screen view at high resolution onto an offscreen canvas
+ * and resolves to a PNG Blob.
  */
-export async function downloadCurrentScreenImage(
+export function renderScreenToBlob(
   width: number,
   height: number,
   camera: Camera,
   elements: WhiteboardElement[],
-): Promise<void> {
+): Promise<Blob> {
   const exportDpr = Math.max(window.devicePixelRatio || 1, 2)
   const offscreen = document.createElement('canvas')
   offscreen.width = Math.round(width * exportDpr)
   offscreen.height = Math.round(height * exportDpr)
 
   const ctx = offscreen.getContext('2d')
-  if (!ctx) return
+  if (!ctx) {
+    return Promise.reject(new Error('Could not initialize 2D canvas context'))
+  }
 
   renderScene({
     ctx,
@@ -280,32 +282,72 @@ export async function downloadCurrentScreenImage(
     draftElement: null,
   })
 
+  return new Promise<Blob>((resolve, reject) => {
+    offscreen.toBlob((blob) => {
+      if (blob) {
+        resolve(blob)
+      } else {
+        reject(new Error('Failed to encode canvas image as PNG'))
+      }
+    }, 'image/png')
+  })
+}
+
+/**
+ * Copies the current screen image at high resolution on a crisp white background
+ * directly to the system clipboard as a PNG image.
+ */
+export async function copyCurrentScreenImageToClipboard(
+  width: number,
+  height: number,
+  camera: Camera,
+  elements: WhiteboardElement[],
+): Promise<void> {
+  if (
+    typeof navigator === 'undefined' ||
+    !navigator.clipboard?.write ||
+    typeof ClipboardItem === 'undefined'
+  ) {
+    throw new Error('Image clipboard is not supported in this browser')
+  }
+
+  const blobPromise = renderScreenToBlob(width, height, camera, elements)
+
+  try {
+    // Passing Promise<Blob> directly to ClipboardItem preserves the transient user gesture on iOS Safari / WebKit
+    const item = new ClipboardItem({ 'image/png': blobPromise })
+    await navigator.clipboard.write([item])
+  } catch {
+    // Fallback for browsers that require a resolved Blob instance in ClipboardItem
+    const blob = await blobPromise
+    const item = new ClipboardItem({ 'image/png': blob })
+    await navigator.clipboard.write([item])
+  }
+}
+
+/**
+ * Exports the current screen image at high resolution on a crisp white background
+ * and triggers an immediate file download.
+ */
+export async function downloadCurrentScreenImage(
+  width: number,
+  height: number,
+  camera: Camera,
+  elements: WhiteboardElement[],
+): Promise<void> {
   const now = new Date()
   const pad = (n: number) => String(n).padStart(2, '0')
   const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
   const filename = `sketch-${stamp}.png`
 
-  const triggerDownload = (href: string, revokeAfter = false) => {
-    const link = document.createElement('a')
-    link.download = filename
-    link.href = href
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    if (revokeAfter) {
-      setTimeout(() => URL.revokeObjectURL(href), 5000)
-    }
-  }
-
-  await new Promise<void>((resolve) => {
-    offscreen.toBlob((blob) => {
-      if (blob) {
-        const url = URL.createObjectURL(blob)
-        triggerDownload(url, true)
-      } else {
-        triggerDownload(offscreen.toDataURL('image/png'))
-      }
-      resolve()
-    }, 'image/png')
-  })
+  const blob = await renderScreenToBlob(width, height, camera, elements)
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.download = filename
+  link.href = url
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  setTimeout(() => URL.revokeObjectURL(url), 5000)
 }
+
