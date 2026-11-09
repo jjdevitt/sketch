@@ -14,7 +14,7 @@ Sketch is a simple React App with no backend that offers a stateless and quick m
   - **Color & Stroke Weight**: Curated whiteboard ink palette with Fine, Medium, and Bold weights.
 - **Multi-Touch & Laptop Navigation**: Two-finger pinch-to-zoom and pan on touch devices; trackpad scroll, `Ctrl/Cmd + Scroll` zoom, `Space + Drag` pan, and single-key tool shortcuts on laptops.
 - **Undo, Redo & Safe Clear**: Full undo/redo history stack, including one-tap undo after clearing the canvas.
-- **Copy to Clipboard & Save Image**: Capture the current sketch directly to the system clipboard as a PNG image (`Copy` button or `Ctrl/Cmd + C`), or export it as a high-DPI `.png` download (`Save` button or `Ctrl/Cmd + S`).
+- **Copy to Clipboard & Save Image**: Capture the current sketch directly to the system clipboard as a PNG image (`Copy` button or `Ctrl/Cmd + C`), or download it as a `.png` from the Copy/Share sheet (shown on Android) or with `Ctrl/Cmd + S` on a laptop.
 
 ## Development
 

@@ -58,7 +58,6 @@ export function App() {
   const [isStyleOpen, setIsStyleOpen] = useState(false)
   const [isSpacePressed, setIsSpacePressed] = useState(false)
   const [justCopied, setJustCopied] = useState(false)
-  const [justSaved, setJustSaved] = useState(false)
   const [toast, setToast] = useState<ToastState>(null)
   const [fallbackSnapshot, setFallbackSnapshot] = useState<SnapshotModalState | null>(
     null,
@@ -69,7 +68,6 @@ export function App() {
     height: typeof window !== 'undefined' ? window.innerHeight : 768,
   })
   const copyTimerRef = useRef<number | null>(null)
-  const saveTimerRef = useRef<number | null>(null)
   const toastTimerRef = useRef<number | null>(null)
 
   const activeColor = activeTool === 'highlighter' ? highlighterColor : inkColor
@@ -203,13 +201,6 @@ export function App() {
     setIsStyleOpen(false)
     const { width, height } = viewportSizeRef.current
     await downloadCurrentScreenImage(width, height, camera, history.present)
-    setJustSaved(true)
-    if (saveTimerRef.current) {
-      window.clearTimeout(saveTimerRef.current)
-    }
-    saveTimerRef.current = window.setTimeout(() => {
-      setJustSaved(false)
-    }, 2000)
   }, [camera, history.present])
 
   const handleResetView = useCallback(() => {
@@ -359,7 +350,6 @@ export function App() {
   useEffect(() => {
     return () => {
       if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current)
-      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current)
     }
   }, [])
@@ -371,13 +361,11 @@ export function App() {
         canRedo={history.future.length > 0}
         isEmpty={history.present.length === 0}
         justCopied={justCopied}
-        justSaved={justSaved}
         camera={camera}
         onUndo={handleUndo}
         onRedo={handleRedo}
         onClear={handleClear}
         onCopy={() => void handleCopy()}
-        onSave={() => void handleSave()}
         onResetView={handleResetView}
       />
 
